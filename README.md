@@ -1,183 +1,181 @@
-# Arduino Library Manager list
+# MS5849_30BA Arduino Library
 
-This repository contains the list of libraries in the [Arduino Library Manager](https://docs.arduino.cc/software/ide-v1/tutorials/installing-libraries#using-the-library-manager) index.
+Arduino IDE library for the TE Connectivity MS5849-30BA 30 bar absolute pressure sensor using I2C.
 
-## Table of Contents
+## Wiring
 
-<!-- toc -->
+The MS5849-30BA is a 3.3 V device. If you use a 5 V Arduino board, use a proper I2C level shifter.
 
-- [Frequently asked questions](#frequently-asked-questions)
-- [Adding a library to Library Manager](#adding-a-library-to-library-manager)
-- [Request registration data changes for a library](#request-registration-data-changes-for-a-library)
-- [Report a problem with Library Manager](#report-a-problem-with-library-manager)
-- [Security & Malware Reporting](#security--malware-reporting)
+| Sensor | Arduino |
+| --- | --- |
+| VDD | 3.3 V |
+| GND | GND |
+| SDA | SDA |
+| SCL | SCL |
 
-<!-- tocstop -->
+Default I2C address in the example is `0x77` (`ADDRESS_GND`). Some boards/jumpers use `0x76` (`ADDRESS_VCC`).
 
-## Frequently asked questions
+## Install
 
-For more information about Arduino Library Manager and how the index is maintained, please see [the FAQ](FAQ.md).
+1. Download the ZIP.
+2. Arduino IDE: **Sketch > Include Library > Add .ZIP Library...**
+3. Open **File > Examples > MS5849_30BA > MS5849_30BA_Basic**.
 
-<a name="instructions"></a>
+## Basic use
 
-## Adding a library to Library Manager
+```cpp
+#include <Wire.h>
+#include <MS5849_30BA.h>
 
-If you would like to make a library available for installation via Library Manager, just submit a [pull request](https://docs.github.com/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests) that adds the repository URL to [the list](repositories.txt). You are welcome to add multiple libraries at once.
+MS5849_30BA sensor;
 
----
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  Wire.setClock(400000);  // 400 kHz I2C — sensor supports it
+  sensor.begin(MS5849_30BA::ADDRESS_GND, MS5849_30BA::OSR_6, MS5849_30BA::OSR_1);
+}
 
-⚠ If you behave irresponsibly in your interactions with this repository, your Library Manager Registry privileges will be revoked.
+void loop() {
+  float pressureMbar, temperatureC;
+  if (sensor.read(pressureMbar, temperatureC)) {
+    Serial.println(pressureMbar);
+    Serial.println(temperatureC);
+  }
+  delay(100);
+}
+```
 
-Carefully read and follow the instructions in any comments the bot and human maintainers make on your pull requests. If you are having trouble following the instructions, add a comment that provides a detailed description of the problem you are having and a human maintainer will provide assistance.
+## Independent oversampling
 
-Although we have set up automation for the most basic tasks, this repository is maintained by humans. So please behave in a manner appropriate for interacting with humans, including being clear in communicating what you are hoping to accomplish.
+Pressure and temperature OSR can be set independently. Temperature changes slowly, so a low temperature OSR saves conversion time without hurting accuracy:
 
----
+```cpp
+// High resolution pressure, fast temperature
+sensor.begin(MS5849_30BA::ADDRESS_GND, MS5849_30BA::OSR_6, MS5849_30BA::OSR_1);
 
-Detailed instructions for submitting a library are provided below.
+// Or change later:
+sensor.setOversampling(MS5849_30BA::OSR_5, MS5849_30BA::OSR_1);
+```
 
-### A. Preparation
+## Hardware IIR filter
 
----
+The MS5849-30BA has a built-in digital IIR low-pass filter that smooths ADC noise at the hardware level. Enable or disable it and set the strength:
 
-❗ Before you begin, please ensure you have 45 minutes of time to dedicate to completing the submission procedure. A submission will typically only take a few minutes, but if your library is not specification compliant or your are not already familiar with the basics of using GitHub, it may take longer. If problems with the submission are detected, we expect you to resolve them promptly.
+```cpp
+// Enable with strength 2 (FILTER_1 .. FILTER_7, higher = smoother)
+sensor.setFilter(true, MS5849_30BA::FILTER_2);
 
----
+// Or set directly
+sensor.setFilter(MS5849_30BA::FILTER_3);
 
-1. Review [the requirements for admission into the Arduino Library Manager index](FAQ.md#submission-requirements). Each submission will be checked for compliance with these requirements before being accepted.
-1. If you identify any aspects of the library that do not meet the requirements, please resolve them.
+// Disable
+sensor.setFilter(false);
 
----
+// Check current setting
+MS5849_30BA::Filter f = sensor.pressureFilter();
+```
 
-**ⓘ** If a requirement is not clear to you, or if you are not able to determine whether the library is in compliance with a requirement, it is OK to proceed with making the submission. The automated submission handling system is designed to help you to resolve any problems that are detected, so you may find that things are more clear once the submission is in progress.
+## Software EMA filter
 
----
+An optional exponential moving-average filter smooths pressure readings in software on top of any hardware filtering:
 
-### B. Fork the Arduino Library Registry repository
+```cpp
+sensor.setEmaAlpha(0.1);  // 0.0–1.0. Smaller = smoother. 1.0 = off (default).
 
-You will first make the changes required to add the library in a copy of the Arduino Library Registry repository under your GitHub account. The term for a copy of a repository is "[fork](https://docs.github.com/get-started/quickstart/fork-a-repo)".
+// After read():
+float smoothed = sensor.emaPressure();  // latest EMA value
 
-1. Click the following link:<br />
-   https://github.com/arduino/library-registry/fork<br />
-   The "**Create a new fork**" page will open in your web browser.
-1. Click the "**Create fork**" button in the "**Create a new fork**" page.
+sensor.resetEma();  // reset filter state
+```
 
-The fork will be created, and the home page of the fork will open.
+## Temperature skip
 
-### C. Create a feature branch in the fork
+When polling rapidly, skip temperature reads to save time. The cached temperature is reused for pressure compensation between reads:
 
-Multiple revision histories may be stored in a single repository. The term for each revision history is "[branch](https://docs.github.com/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches)". You will create a dedicated branch in which to stage the work to submit the library.
+```cpp
+sensor.setTemperatureSkip(10);  // read temp once every 10 calls
+```
 
-1. Click the "**1 Branch**" link on the home page of your fork.<br />
-   The "**Branches**" page will open.
-1. Click the "**New branch**" button on the "**Branches**" page.<br />
-   The "**Create a branch**" dialog will open.
-1. Type `my-submission` (or any other name you like) in the "**New branch name**" field of the "**Create a branch**" dialog.<br />
-   The "**Create a branch**" dialog will close.
-1. Click on the first drop-down menu under the "**Source**" section of the dialog.<br />
-   The drop-down menu will open.
-1. Select "**arduino/library-registry**" from the menu.
-1. Click on the second drop-down menu under the "**Source**" section of the dialog.<br />
-   The drop-down menu will open.
-1. Select "**main**" from the menu.
-1. Click the "**Create new branch**" button at the bottom of the dialog.<br />
-   The "**Create a branch**" dialog will close, returning you to the "**Branches**" page.
-1. Look under the "**Your branches**" section of the "**Branches**" page. You will see a link there for the branch you created during the previous step (i.e., `my-submission`). Click that link.<br />
-   The home page of your fork will open, with the newly created branch selected.
+## Non-blocking (async) reads
 
-### D. Add the library URL to the list
+For time-critical applications, the non-blocking API frees the MCU during ADC conversion:
 
-Now you are ready to make the change in the repository content that adds the library to the Arduino Library Registry. This is done by adding the URL of the repository to a text file that contains a list of all the registered libraries. The term for a change in a repository's revision history is "[commit](https://git-scm.com/docs/git-commit)".
+```cpp
+void loop() {
+  static bool running = false;
+  static uint32_t lastMs = 0;
 
-1. Click on the file `repositories.txt` under the list of files you see on the home page of your fork.<br />
-   The "**library-registry/repositories.txt**" page will open.
-1. Click the pencil icon ("Edit this file") at the right hand side of the toolbar in the "**library-registry/repositories.txt**" page.<br />
-   The `repositories.txt` file will open in the online text editor.
-1. Add the URL of the repository of the library you wish to submit to the list in the online text editor.
-   - **ⓘ** It doesn't matter at which position in the list you add the URL.
-   - **ⓘ** This should be the URL of the repository home page. For example:
-     ```text
-     https://github.com/arduino-libraries/Servo
-     ```
-   - ❗ Be careful to avoid making any changes to the other URLs in the list.
-1. Click the "**Commit changes...**" button located near the top right hand corner of the page.<br />
-   The "**Commit changes**" dialog will open.
-1. Select the "**Commit directly to the `my-submission` branch**" radio button in the dialog.<br />
-   **ⓘ** If you chose a name other than `my-submission` when creating the branch, the radio button will instead have that branch name.
-1. Click the "**Commit changes**" button in the "**Commit changes**" dialog.<br />
-   The "**Commit changes**" dialog will close.
-1. Click the "**library-registry**" link at the top of the "**library-registry/repositories.txt**" page.<br />
-   The home page of your fork will open.
+  if (!running && (millis() - lastMs >= 50)) {
+    sensor.startConversionAsync();
+    running = true;
+  }
 
-### E. Make the pull request
+  if (running) {
+    float pressure, temperature;
+    if (sensor.readAsync(pressure, temperature)) {
+      running = false;
+      lastMs = millis();
+      Serial.println(pressure, 3);
+    }
+  }
 
-Now that you have the necessary changes staged in your fork, it is time to propose those changes be accepted into the parent repository. The term for such a proposal is "[pull request](https://docs.github.com/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-pull-requests)" (PR).
+  // MCU is free to do other work here
+}
+```
 
-1. Click the "**Contribute**" button on the home page of your fork.<br />
-   A menu will open.
-1. Click the "**Open pull request**" button in the menu.<br />
-   The "**Open a pull request**" page will open.
-1. Click the "**Create pull request**" button on the "**Open a pull request**" page.
+## Reading internal calibration
 
-The pull request will be submitted.
+`begin()` automatically reads and caches the internal factory calibration PROM/NVRAM. You can print or copy those values like this:
 
-### F. Monitor pull request and resolve any problems
+```cpp
+MS5849_30BA::CalibrationData cal;
+sensor.getCalibration(cal);
 
-The submission of the pull request will trigger an automated system. This system checks your pull request and the submitted library for problems. It will register the library if no problems are found. It will communicate with you via comments added to the pull request.
+Serial.println(cal.serialNumber, HEX);
+Serial.println(cal.productId, HEX);
+Serial.println(cal.storedCrc, HEX);
+Serial.println(cal.calculatedCrc, HEX);
+Serial.println(cal.crcOk ? "CRC OK" : "CRC mismatch");
 
----
+for (uint8_t i = 1; i <= 10; i++) {
+  Serial.print("C");
+  Serial.print(i);
+  Serial.print(" = ");
+  Serial.println(cal.c[i]);
+}
 
-❗ Please closely monitor the pull request and take prompt action to resolve any problems reported by the automated system and human maintainers.
+for (uint8_t addr = 0; addr < 16; addr++) {
+  Serial.println(cal.rawProm[addr], HEX);
+}
+```
 
----
+You can also read one calibration/PROM word directly from the device:
 
-1. Watch your pull request until you see a comment from the bot.<br />
-   **ⓘ** You should only need to wait a few minutes at most.
-1. If you see that the pull request was merged, this means your library has been successfully registered 🎉 and the library will be available for installation via Library Manager within a day's time. If instead the comment from the bot says that a problem was found, please promptly follow the provided instructions to resolve the problem. There is additional information about resolving problems below.
+```cpp
+uint16_t word;
+if (sensor.readCalibrationWord(0x04, word)) {
+  Serial.println(word, HEX); // C1
+}
+```
 
----
+## Accuracy notes
 
-**ⓘ** In addition to checking for problems that block the acceptance of the library, the automated system also displays warnings when it identifies potential areas for improvement in the library. We do recommend you pay attention to these warnings and act on them. However, warnings do not block or otherwise affect the registration of the library. It is only the items labeled as errors that block acceptance.
+### Double-precision compensation
 
----
+The compensation math uses `double` internally. On 32-bit boards (ARM, ESP32, RP2040, Teensy) this gives true 64-bit precision (~15 significant digits), eliminating the rounding errors that 32-bit `float` causes with the large intermediate products.
 
-The problem may be either with your pull request or with the library:
+On 8-bit AVR boards `double` is the same as `float` (32 bits). For maximum AVR accuracy, rewrite the `compensate()` method using `int64_t` fixed-point arithmetic — do all multiplications and divisions in integer, and convert to `float` only at the final output step.
 
-#### If the problem is with the pull request:
+### Hardware tips
 
-Edit the file in the [branch](https://docs.github.com/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/about-branches) you submitted the pull request from in your fork of the `arduino/library-registry` repository, then commit.
+- Decouple VDD with a 100 nF ceramic cap right at the sensor pins.
+- Keep I2C traces short and away from noisy signals.
+- If sub-mbar accuracy is critical, reduce read rate to minimise die self-heating.
 
-Doing this will update the pull request and cause the automated checks to run again.
+## Notes
 
-#### If the problem is with the library:
-
-1. Make the necessary fix in the library repository.
-1. Increment the `version` value in the library's [library.properties file](https://arduino.github.io/arduino-cli/latest/library-specification/#library-metadata).
-1. Create a [release](https://docs.github.com/repositories/releasing-projects-on-github/managing-releases-in-a-repository) or [tag](https://git-scm.com/docs/git-tag). The Library Manager index always uses tagged versions of the libraries, so even if the development version of the library is compliant, it can't be accepted until the latest release or tag is compliant. Alternatively, you can redo the existing release/tag if you prefer.
-1. Comment on your pull request here in the `arduino/library-registry` repository, mentioning **@ArduinoBot** in the comment. Doing this will cause the automated check to run again.
-
-<a name="changing-the-url-of-a-library-already-in-library-manager"></a>
-
-<a name="removing-a-library-from-library-manager"></a>
-
-## Request registration data changes for a library
-
-Library maintainers sometimes find the need to request changes be made to the registration data for a library in the Arduino Library Registry.
-
-Instructions for making such requests are provided [**here**](maintenance-requests.md).
-
-## Report a problem with Library Manager
-
-First, please take a look at [the FAQ](FAQ.md). If a library release is missing from Library Manager, it is usually because it was not compliant with all [the requirements](FAQ.md#update-requirements) listed in that document.
-
-This repository is not an appropriate place to request support or report problems with a library. Check the library's own documentation for instructions or ask on the [Arduino Forum](https://forum.arduino.cc/).
-
-If the problem is about something else, please submit an issue report [here](https://github.com/arduino/library-registry/issues/new/choose).
-
-## Security & Malware Reporting
-
-If you think you found a vulnerability, malware or other security-related defect in any Arduino Library projects, please take a look at our security policy and report it to our Security Team 🛡️.
-
-Thank you!
-
-E-mail contact: security@arduino.cc
+- Returns compensated pressure in mbar and temperature in degrees Celsius.
+- Reads all 16 internal PROM/NVRAM words and exposes C1..C10, serial number, product ID, stored CRC, and calculated CRC.
+- Uses MS5849-30BA commands and compensation constants from the public reference material for the Pressure 23 Click/MS5849-30BA.
+- The library is I2C-only; SPI is not included.
